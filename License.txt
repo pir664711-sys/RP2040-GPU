@@ -1,0 +1,4 @@
+License
+Copyright (c) 2026 Abdallah. All rights reserved.
+
+Unauthorized copying, modification, distribution, or use of any files, binaries, or documentation in this repository via any medium is strictly prohibited.
