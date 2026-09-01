@@ -1,0 +1,147 @@
+This is Test EXE OpenSource 
+#include <cstdio>
+#include <cstring>
+#include <cstdlib>
+#include <windows.h>
+#include "Type Path where .H for dll is there"
+
+static int askInt(const char* prompt) {
+    char line[64];
+    printf("%s", prompt);
+    if (!fgets(line, sizeof(line), stdin)) return 0;
+    return atoi(line);
+}
+
+static void printResult(int r) {
+    switch (r) {
+    case LITELG_OK:          printf("  OK\n"); break;
+    case LITELG_ERR_PARAM:   printf("  Error: bad handle/argument\n"); break;
+    case LITELG_ERR_WRITE:   printf("  Error: write to COM port failed\n"); break;
+    case LITELG_ERR_TIMEOUT: printf("  Error: board did not reply in time\n"); break;
+    case LITELG_ERR_NACK:    printf("  Error: board replied but not with ACK\n"); break;
+    default:                 printf("  Error: code %d\n", r); break;
+    }
+}
+
+int main(void) {
+    char ports[256];
+    int n = LiteLg_ListPorts(ports, sizeof(ports));
+    printf("Detected COM ports: %s (%d found)\n", n > 0 ? ports : "(none)", n);
+
+    char portName[32];
+    printf("COM port to open (e.g. COM7): ");
+    if (!fgets(portName, sizeof(portName), stdin)) return 1;
+    portName[strcspn(portName, "\r\n")] = 0;
+
+    printf("Opening %s at 115200 baud...\n", portName);
+    void* dev = LiteLg_Open(portName, 115200);
+    if (!dev) {
+        printf("Failed to open %s. Check the port name and that nothing else has it open.\n", portName);
+        return 1;
+    }
+
+    printf("Opened. Pinging board...\n");
+    int pingResult = LiteLg_Ping(dev);
+    printf(pingResult == LITELG_OK ? "Board responded, we are live.\n"
+        : "No/bad response to ping - check wiring/baud, continuing anyway.\n");
+
+    for (;;) {
+        printf("\n===== LiteLg test console =====\n");
+        printf(" 1) Clear            2) Set palette\n");
+        printf(" 3) Pixel            4) Line\n");
+        printf(" 5) Rect             6) Fill rect\n");
+        printf(" 7) Circle           8) Fill circle\n");
+        printf(" 9) Triangle        10) Fill triangle\n");
+        printf("11) Swap            12) Ping\n");
+        printf(" 0) Quit\n");
+        int choice = askInt("Choose: ");
+        int r = LITELG_OK;
+
+        switch (choice) {
+        case 0:
+            LiteLg_Close(dev);
+            printf("Disconnected.\n");
+            return 0;
+
+        case 1: {
+            int c = askInt("Color 0-255: ");
+            r = LiteLg_Clear(dev, (uint8_t)c);
+            break;
+        }
+        case 2: {
+            int idx = askInt("Palette index 0-255: ");
+            int rr = askInt("Red 0-255: ");
+            int gg = askInt("Green 0-255: ");
+            int bb = askInt("Blue 0-255: ");
+            r = LiteLg_SetPalette(dev, (uint8_t)idx, (uint8_t)rr, (uint8_t)gg, (uint8_t)bb);
+            break;
+        }
+        case 3: {
+            int x = askInt("X: "), y = askInt("Y: "), c = askInt("Color: ");
+            r = LiteLg_Pixel(dev, (int16_t)x, (int16_t)y, (uint8_t)c);
+            break;
+        }
+        case 4: {
+            int x0 = askInt("X0: "), y0 = askInt("Y0: ");
+            int x1 = askInt("X1: "), y1 = askInt("Y1: ");
+            int c = askInt("Color: ");
+            r = LiteLg_Line(dev, (int16_t)x0, (int16_t)y0, (int16_t)x1, (int16_t)y1, (uint8_t)c);
+            break;
+        }
+        case 5: {
+            int x = askInt("X: "), y = askInt("Y: ");
+            int w = askInt("Width: "), h = askInt("Height: ");
+            int c = askInt("Color: ");
+            r = LiteLg_Rect(dev, (int16_t)x, (int16_t)y, (int16_t)w, (int16_t)h, (uint8_t)c);
+            break;
+        }
+        case 6: {
+            int x = askInt("X: "), y = askInt("Y: ");
+            int w = askInt("Width: "), h = askInt("Height: ");
+            int c = askInt("Color: ");
+            r = LiteLg_FillRect(dev, (int16_t)x, (int16_t)y, (int16_t)w, (int16_t)h, (uint8_t)c);
+            break;
+        }
+        case 7: {
+            int x = askInt("Center X: "), y = askInt("Center Y: ");
+            int rad = askInt("Radius: "), c = askInt("Color: ");
+            r = LiteLg_Circle(dev, (int16_t)x, (int16_t)y, (int16_t)rad, (uint8_t)c);
+            break;
+        }
+        case 8: {
+            int x = askInt("Center X: "), y = askInt("Center Y: ");
+            int rad = askInt("Radius: "), c = askInt("Color: ");
+            r = LiteLg_FillCircle(dev, (int16_t)x, (int16_t)y, (int16_t)rad, (uint8_t)c);
+            break;
+        }
+        case 9: {
+            int x0 = askInt("X0: "), y0 = askInt("Y0: ");
+            int x1 = askInt("X1: "), y1 = askInt("Y1: ");
+            int x2 = askInt("X2: "), y2 = askInt("Y2: ");
+            int c = askInt("Color: ");
+            r = LiteLg_Triangle(dev, (int16_t)x0, (int16_t)y0, (int16_t)x1, (int16_t)y1,
+                (int16_t)x2, (int16_t)y2, (uint8_t)c);
+            break;
+        }
+        case 10: {
+            int x0 = askInt("X0: "), y0 = askInt("Y0: ");
+            int x1 = askInt("X1: "), y1 = askInt("Y1: ");
+            int x2 = askInt("X2: "), y2 = askInt("Y2: ");
+            int c = askInt("Color: ");
+            r = LiteLg_FillTriangle(dev, (int16_t)x0, (int16_t)y0, (int16_t)x1, (int16_t)y1,
+                (int16_t)x2, (int16_t)y2, (uint8_t)c);
+            break;
+        }
+        case 11:
+            r = LiteLg_Swap(dev);
+            break;
+        case 12:
+            r = LiteLg_Ping(dev);
+            break;
+        default:
+            printf("Unrecognized option\n");
+            continue;
+        }
+        printResult(r);
+    }
+}
