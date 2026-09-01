@@ -1,0 +1,143 @@
+# How an EXE calls into a DLL — using LiteLg as the example
+
+This walks through the whole chain: DLL source → header → import lib →
+EXE, using the LiteLg.dll / tester.exe pair as the concrete example. The
+same steps apply to any C/C++ DLL.
+
+## 1. The DLL exports functions
+
+A DLL is just compiled code sitting in a `.dll` file. By itself, nothing
+outside it can see what's inside — a function has to be explicitly
+**exported** for another program to call it.
+
+In the DLL's source, that's done with `__declspec(dllexport)`:
+
+```cpp
+// Inside LiteLg.cpp, when LITELG_BUILD_DLL is defined:
+__declspec(dllexport) void* LiteLg_Open(const char* portName, int baud) {
+    ...
+}
+```
+
+`extern "C"` around the declarations stops C++ name-mangling, so the
+exported name is the plain function name (`LiteLg_Open`) instead of a
+mangled C++ signature — this matters because the next two steps need to
+refer to that name literally.
+
+## 2. The header describes the functions to callers
+
+`LiteLg.h` is the contract: it declares every function the DLL exports,
+with the exact same names and signatures, so any program that includes
+it knows what it can call and how.
+
+```cpp
+#if defined(LITELG_BUILD_DLL)
+  #define LITELG_API __declspec(dllexport)   // used when compiling the DLL itself
+#else
+  #define LITELG_API __declspec(dllimport)   // used by anyone consuming the DLL
+#endif
+
+LITELG_API void* LiteLg_Open(const char* portName, int baud);
+```
+
+The same header is `#include`d on both sides — once while building the
+DLL (where `LITELG_BUILD_DLL` is defined, so it exports), and once by
+any EXE that wants to call it (where it's not defined, so it imports).
+That's why LiteLg.h works unmodified in both projects.
+
+## 3. The `.def` file lists the exports for the linker
+
+When you build a DLL, the compiler also needs to produce an **import
+library** (`LiteLg.lib`) — a small file that doesn't contain any code,
+just a table saying "these names live in LiteLg.dll." An EXE links
+against that `.lib`, not the `.dll` directly.
+
+The `.def` file is what tells `lib.exe` which names to put in that
+table:
+
+```
+LIBRARY LiteLg
+
+EXPORTS
+    LiteLg_Open
+    LiteLg_Close
+    LiteLg_Ping
+    ...
+```
+
+Every function in the header that the DLL actually exports needs to be
+listed here. Miss one, and linking anything that calls it fails with
+`unresolved external symbol` — even though the DLL itself is fine.
+
+## 4. Build order
+
+Three artifacts, in this order, each depending on the one before:
+
+1. **Compile the DLL** from its `.cpp`/`.h` → produces `LiteLg.dll`.
+2. **Generate the import lib** from the `.def`, matching the DLL's
+   bitness:
+   ```
+   lib /def:LiteLg.def /machine:x64 /out:LiteLg.lib
+   ```
+3. **Compile the EXE**, giving the linker both the header (to compile)
+   and the `.lib` (to link):
+   - Project → C/C++ → General → Additional Include Directories → folder with `LiteLg.h`
+   - Project → Linker → Input → Additional Dependencies → `LiteLg.lib`
+   - Project → Linker → General → Additional Library Directories → folder with `LiteLg.lib`
+
+If you change the DLL's exported functions, you must redo steps 2 and 3
+— an EXE linked against an old `.lib` will either fail to link
+(missing new symbols) or, worse, silently call the wrong thing if
+signatures changed but names didn't.
+
+## 5. What actually happens when the EXE runs
+
+The `.lib` only matters at **link time** — it doesn't contain the real
+code. At **run time**, Windows loads `LiteLg.dll` itself and resolves
+each call into it. That means:
+
+- `LiteLg.dll` must be sitting next to the `.exe` (or somewhere on
+  `PATH`) when you run it, even though it wasn't needed to *build* the
+  exe beyond the `.lib`.
+- The DLL and EXE must be built for the **same architecture** (both
+  x64, or both x86) — Windows will refuse to load a mismatched one.
+
+## 6. Calling it from the EXE's code
+
+Once the header and lib are wired up, calling into the DLL looks like
+any normal function call — the linking machinery above is what makes
+that possible:
+
+```cpp
+#include "LiteLg.h"
+
+void* dev = LiteLg_Open("COM8", 115200);   // -> calls into LiteLg.dll
+if (dev) {
+    LiteLg_Clear(dev, 0);                  // -> calls into LiteLg.dll
+    LiteLg_FillRect(dev, 10, 10, 50, 50, 1);
+    LiteLg_Swap(dev);
+    LiteLg_Close(dev);
+}
+```
+
+Nothing here looks different from calling a function defined in the
+same project — that's the point of the header/lib setup: it hides the
+DLL boundary from the calling code entirely.
+
+## Troubleshooting checklist
+
+- **`unresolved external symbol __imp_X`** → `X` is missing from the
+  `.def` file, or you're linking an old `.lib` that predates it. Add it
+  to `.def`, regenerate the `.lib`, rebuild.
+- **DLL loads but crashes / access violation** → bitness or build
+  config (Debug vs Release) mismatch between DLL and EXE. Rebuild both
+  the same way.
+- **"The program can't start because LiteLg.dll is missing"** → the
+  `.dll` isn't in the same folder as the `.exe` at runtime. Copy it
+  over (or set up a post-build copy step).
+- **Function exists in the DLL but the EXE still can't see it** →
+  check the `.def` file lists the exact name, and that the header's
+  declaration matches the DLL's real signature exactly (parameter
+  types/order, return type).
+
+--Anything Not Clear Please 
